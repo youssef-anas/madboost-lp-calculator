@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ---------------------------------------
-# MADBOOST LP CALCULATOR (FULL VERSION)
+# MADBOOST LP CALCULATOR (Dual Comparison Version)
 # ---------------------------------------
 
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
@@ -34,10 +34,8 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
     else:
         remaining_in_current = LP_PER_DIVISION - current_lp
         total_lp += remaining_in_current
-
         for i in range(curr_idx + 1, target_idx):
             total_lp += LP_PER_DIVISION
-
         total_lp += target_lp
 
     divisions_between = abs(target_idx - curr_idx)
@@ -79,7 +77,7 @@ def next_lp_price(base_price, current_lp, lp_gain, multipliers):
 # -------------------- Streamlit UI --------------------
 st.set_page_config(page_title="MadBoost Rank Boost Calculator", layout="wide")
 
-# --- Custom Styling ---
+# --- Styling ---
 st.markdown("""
 <style>
 body {background-color: #0e0e0e; color: #fff;}
@@ -99,7 +97,8 @@ with col1:
         st.write("🔥 MadBoost")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.caption("Includes dynamic LP pricing, reference comparison, and next LP prediction.")
+    st.caption("Now compares client path vs. Iron IV-based pricing reference.")
+
 st.markdown("---")
 
 # --- Inputs ---
@@ -143,31 +142,38 @@ with col_right:
             st.info(f"🧮 Total LP Required: **{total_lp} LP**")
             st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
-            # --- Main Route ---
-            total_price, progression, last_step_price = calculate_lp_boost_price(
-                base_price, total_lp, lp_gain, multipliers
-            )
-            st.metric("Total Boost Price", f"${total_price}")
-            next_price = next_lp_price(base_price, current_lp, lp_gain, multipliers)
-            st.metric("💡 Price for Next 1 LP", f"${next_price}")
-
-            # --- Parallel Reference Calculation (Iron IV -> Target) ---
+            # --- Parallel Reference (Iron IV -> Target) ---
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, target_rank, target_div, target_lp)
             _, _, ref_last_price = calculate_lp_boost_price(base_price, ref_lp, lp_gain, multipliers)
-            percent_increase = ((ref_last_price - base_price) / base_price) * 100
 
-            st.markdown("### 🔍 Reference (Iron IV → Target Rank)")
-            st.write(f"**1 LP Price at Iron IV:** ${base_price:.2f}")
-            st.write(f"**1 LP Price at Target Rank:** ${ref_last_price:.2f}")
-            st.write(f"📈 LP price growth: **+{percent_increase:.1f}%** from Iron IV to {target_rank} {target_div}")
+            # --- Client Calculation with User Base Price ---
+            total_price_client, progression_client, _ = calculate_lp_boost_price(
+                base_price, total_lp, lp_gain, multipliers
+            )
 
-            # --- Table + Chart ---
-            df = pd.DataFrame(progression)
+            # --- Client Calculation Using Ref Last LP Price as Base ---
+            total_price_scaled, progression_scaled, _ = calculate_lp_boost_price(
+                ref_last_price, total_lp, lp_gain, multipliers
+            )
+
+            next_price = next_lp_price(base_price, current_lp, lp_gain, multipliers)
+
+            # --- Display both results ---
+            st.markdown("### 💰 Price Comparison")
+            st.metric("Client Path (Your Base)", f"${total_price_client}")
+            st.metric("Client Path (Iron IV Base Adjusted)", f"${total_price_scaled}")
+            st.caption(f"New base price used from reference: ${ref_last_price:.2f}")
+
+            st.metric("💡 Price for Next 1 LP", f"${next_price}")
+
+            df = pd.DataFrame(progression_client)
             st.dataframe(df, hide_index=True, use_container_width=True)
 
+            # --- Chart Comparison ---
             fig, ax = plt.subplots(figsize=(6, 3))
-            ax.plot(df["LP Step"], df["Step Price ($)"], marker="o", color="#ff5a00", label="Current→Target Path")
-            ax.axhline(y=ref_last_price, color="cyan", linestyle="--", label="Target Rank Reference Price")
+            ax.plot(df["LP Step"], df["Step Price ($)"], marker="o", color="#ff5a00", label="Client Base")
+            df_scaled = pd.DataFrame(progression_scaled)
+            ax.plot(df_scaled["LP Step"], df_scaled["Step Price ($)"], color="cyan", linestyle="--", label="Iron IV Adjusted Base")
             ax.set_facecolor("#1e1e1e")
             ax.set_title(f"LP Price Progression ({total_lp} LP)", color="white")
             ax.set_xlabel("LP Step", color="white")
@@ -175,6 +181,5 @@ with col_right:
             ax.tick_params(colors="white")
             ax.legend(facecolor="#1e1e1e", labelcolor="white")
             st.pyplot(fig)
-
     else:
-        st.info("👆 Enter your ranks, divisions, and LPs, then click **Calculate**.")
+        st.info("👆 Enter your ranks, then click **Calculate**.")
