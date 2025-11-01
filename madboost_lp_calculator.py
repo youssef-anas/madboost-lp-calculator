@@ -1,10 +1,10 @@
-# Run locally: streamlit run madboost_lp_calculator.py
+# Run: streamlit run madboost_lp_calculator.py
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # ---------------------------------------
-# MADBOOST LP CALCULATOR (Dual Comparison Version)
+# MADBOOST LP CALCULATOR (Iron IV -> Current Rank Reference)
 # ---------------------------------------
 
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
@@ -97,7 +97,7 @@ with col1:
         st.write("🔥 MadBoost")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.caption("Now compares client path vs. Iron IV-based pricing reference.")
+    st.caption("Now compares your base price vs Iron IV → Current Rank adjusted base.")
 
 st.markdown("---")
 
@@ -142,8 +142,8 @@ with col_right:
             st.info(f"🧮 Total LP Required: **{total_lp} LP**")
             st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
-            # --- Parallel Reference (Iron IV -> Target) ---
-            ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, target_rank, target_div, target_lp)
+            # --- Reference Calculation (Iron IV -> Current Rank) ---
+            ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
             _, _, ref_last_price = calculate_lp_boost_price(base_price, ref_lp, lp_gain, multipliers)
 
             # --- Client Calculation with User Base Price ---
@@ -161,8 +161,8 @@ with col_right:
             # --- Display both results ---
             st.markdown("### 💰 Price Comparison")
             st.metric("Client Path (Your Base)", f"${total_price_client}")
-            st.metric("Client Path (Iron IV Base Adjusted)", f"${total_price_scaled}")
-            st.caption(f"New base price used from reference: ${ref_last_price:.2f}")
+            st.metric("Client Path (Iron IV Adjusted Base)", f"${total_price_scaled}")
+            st.caption(f"New base price from Iron IV → {current_rank} {current_div}: ${ref_last_price:.2f}")
 
             st.metric("💡 Price for Next 1 LP", f"${next_price}")
 
