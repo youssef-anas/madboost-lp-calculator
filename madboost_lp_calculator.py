@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------
-# MADBOOST LP CALCULATOR — Simplified Version
+# MADBOOST LP CALCULATOR — Updated Version
 # ----------------------------------------------
 
 # ---------- Core LP Pricing Algorithm ----------
@@ -83,8 +83,22 @@ col_left, col_right = st.columns([1, 2])
 with col_left:
     st.subheader("Input Settings")
 
-    base_price = st.number_input("Base LP price ($)", min_value=1.0, value=100.0, step=1.0)
-    lp_requested = st.number_input("LP to boost (steps)", min_value=1, value=5, step=1)
+    # ✅ Allow decimal & <1 values
+    base_price = st.number_input(
+        "Base LP price ($)",
+        min_value=0.01,
+        value=0.5,
+        step=0.01,
+        format="%.2f"
+    )
+
+    # ✅ Dropdown LP values
+    lp_requested = st.selectbox(
+        "LP to boost (steps)",
+        options=[10, 30, 50, 70, 90],
+        index=0
+    )
+
     lp_gain = st.selectbox("Gain level", ["low", "mid", "high"])
 
     st.markdown("### Tier Multipliers (%)")
@@ -101,7 +115,7 @@ with col_right:
     if calc_button:
         total, progression = calculate_lp_boost_price(base_price, lp_requested, lp_gain, multipliers)
 
-        st.subheader("Results")
+        st.subheader(f"Results for {lp_requested} LP Boost ({lp_gain.capitalize()} Gain)")
         st.metric(label="Total LP Boosting Price", value=f"${total}")
 
         df = pd.DataFrame(progression)
@@ -111,7 +125,7 @@ with col_right:
         fig, ax = plt.subplots(figsize=(6, 3))
         ax.plot(df["Step"], df["Step Price ($)"], marker="o", color="#ff5a00")
         ax.set_facecolor("#1e1e1e")
-        ax.set_title("LP Price Progression", color="white")
+        ax.set_title(f"{lp_requested} LP Price Progression", color="white")
         ax.set_xlabel("Step", color="white")
         ax.set_ylabel("Price ($)", color="white")
         ax.tick_params(colors="white")
