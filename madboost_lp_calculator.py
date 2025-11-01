@@ -1,59 +1,73 @@
-# Run: streamlit run madboost_lp_calculator.py
+# Run with: streamlit run madboost_lp_calculator.py
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# ---------------------------------------
-# MADBOOST LP CALCULATOR (Iron IV → Current Rank Reference)
-# ---------------------------------------
+# -----------------------------------------------------------
+# RANK & LP SYSTEM
+# -----------------------------------------------------------
 
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
 DIVISIONS = ["IV", "III", "II", "I"]
 LP_PER_DIVISION = 100
 
 
-# -------------------- Rank Helpers --------------------
-def rank_index(rank: str, div: str) -> int:
-    """Convert rank + division into linear index."""
+def rank_index(rank, div):
     return RANKS.index(rank) * len(DIVISIONS) + DIVISIONS.index(div)
 
 
-# -------------------- LP Calculation --------------------
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
-    """Total LP difference between two rank/division states."""
+    """Compute total LP distance between current and target ranks."""
     curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
     if target_idx < curr_idx or (target_idx == curr_idx and target_lp <= current_lp):
-        return 0, 0, 0  # invalid (lower or same rank)
+        return 0, 0, 0
 
     total_lp = 0
     if curr_idx == target_idx:
         total_lp = target_lp - current_lp
     else:
-        remaining_in_current = LP_PER_DIVISION - current_lp
-        total_lp += remaining_in_current
+        total_lp += (LP_PER_DIVISION - current_lp)
         for i in range(curr_idx + 1, target_idx):
             total_lp += LP_PER_DIVISION
         total_lp += target_lp
 
-    divisions_between = abs(target_idx - curr_idx)
-    ranks_between = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
-    return total_lp, divisions_between, ranks_between
+    divs = abs(target_idx - curr_idx)
+    ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
+    return total_lp, divs, ranks
 
 
-# -------------------- Pricing Growth --------------------
-def calculate_reference_base_price(base_price, current_rank, current_div, current_lp, multiplier):
-    """Compute Iron IV → current rank base LP reference."""
-    iron_ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
-    if iron_ref_lp == 0:
-        return base_price  # fallback if invalid
-    iron_ref_price = iron_ref_lp * base_price * multiplier
-    return iron_ref_price / iron_ref_lp  # 1 LP reference base price
+# -----------------------------------------------------------
+# PRICE PROGRESSION LOGIC
+# -----------------------------------------------------------
+
+def calculate_price_progression(base_price, total_lp, lp_gain, multipliers):
+    """Progressive LP pricing based on gain level."""
+    gain = lp_gain.lower()
+    growth = multipliers[gain] / 100.0
+    step_price = base_price
+    total_price = 0.0
+    progression = []
+
+    for step in range(1, int(total_lp) + 1):
+        step_price *= (1 + growth)
+        total_price += step_price
+        if step % 10 == 0:
+            progression.append({
+                "LP Step": step,
+                "Step Price ($)": round(step_price, 4),
+                "Cumulative ($)": round(total_price, 2)
+            })
+
+    return round(total_price, 2), progression, step_price  # return final step price
 
 
-# -------------------- Streamlit UI --------------------
+# -----------------------------------------------------------
+# STREAMLIT UI
+# -----------------------------------------------------------
+
 st.set_page_config(page_title="MadBoost Rank Boost Calculator", layout="wide")
 
 # --- Styling ---
@@ -76,7 +90,7 @@ with col1:
         st.write("🔥 MadBoost")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.caption("Now using Iron IV → Current Rank base for reference pricing.")
+    st.caption("Two-path linked LP pricing system — Reference path determines client’s base rate.")
 
 st.markdown("---")
 
@@ -95,8 +109,14 @@ with col_left:
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    base_price = st.number_input("Base LP price ($)", min_value=0.01, value=0.1, step=0.01, format="%.2f")
-    multiplier = st.slider("Difficulty multiplier", 1.0, 3.0, 1.5, 0.1)
+    base_price = st.number_input("Base LP price ($)", min_value=0.01, value=0.10, step=0.01, format="%.2f")
+    lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
+
+    st.markdown("### Tier Multipliers (%)")
+    m_low = st.number_input("Low (%)", min_value=0.0, value=5.0, step=0.5)
+    m_mid = st.number_input("Mid (%)", min_value=0.0, value=10.0, step=0.5)
+    m_high = st.number_input("High (%)", min_value=0.0, value=20.0, step=0.5)
+    multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     st.markdown(" ")
     calc_button = st.button("💰 Calculate Boost Price")
@@ -110,61 +130,55 @@ with col_right:
 
         if total_lp <= 0:
             st.warning("⚠️ Invalid input — target rank must be higher or LP greater.")
-        else:
-            st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
-            st.info(f"🧮 Total LP Required: **{total_lp} LP**")
-            st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
+            st.stop()
 
-            # --- Reference base price (Iron IV -> Current)
-            iron_base_price = calculate_reference_base_price(base_price, current_rank, current_div, current_lp, multiplier)
+        # ---------- REFERENCE PATH: Iron IV → Current ----------
+        ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
+        ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
+            base_price, ref_lp, lp_gain, multipliers
+        )
 
-            # --- Client calculation (normal)
-            client_total_price = total_lp * base_price * multiplier
+        # ---------- CLIENT PATH: Current → Target ----------
+        client_total_price, client_progression, _ = calculate_price_progression(
+            ref_final_step, total_lp, lp_gain, multipliers
+        )
 
-            # --- Reference-adjusted calculation ---
-            ref_total_price = total_lp * iron_base_price * multiplier
+        # ---------- DataFrames ----------
+        df_ref = pd.DataFrame(ref_progression)
+        df_client = pd.DataFrame(client_progression)
 
-            # --- Build progression table ---
-            step_prices = []
-            cumulative = []
-            running_total = 0
-            for i in range(int(total_lp)):
-                step_price = iron_base_price * multiplier  # uses new Iron IV base
-                step_prices.append(step_price)
+        # ---------- Summary ----------
+        st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
+        st.info(f"🧮 Total LP Required: **{total_lp} LP**")
+        st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
-                running_total += base_price * multiplier  # keep client base for cumulative
-                cumulative.append(running_total)
+        colA, colB = st.columns(2)
+        with colA:
+            st.markdown("### 🧱 Reference Path (Iron IV → Current)")
+            st.metric("Total LP", f"{ref_lp}")
+            st.metric("Total Price", f"${ref_total_price:,.2f}")
+            st.metric("Final Step Price", f"${ref_final_step:.4f}")
+            st.dataframe(df_ref, use_container_width=True)
 
-            df = pd.DataFrame({
-                "Step #": range(1, len(step_prices) + 1),
-                "Step Price ($)": [round(p, 4) for p in step_prices],
-                "Cumulative ($)": [round(c, 2) for c in cumulative]
-            })
+        with colB:
+            st.markdown("### 🚀 Client Path (Current → Target)")
+            st.metric("Total LP", f"{total_lp}")
+            st.metric("Total Price", f"${client_total_price:,.2f}")
+            st.metric("Starting LP Price", f"${ref_final_step:.4f}")
+            st.dataframe(df_client, use_container_width=True)
 
-            # --- Display results ---
-            st.markdown("### 💰 Price Summary")
-            colA, colB = st.columns(2)
-            with colA:
-                st.metric("Client Total (Base Price)", f"${client_total_price:,.2f}")
-                st.metric("Reference 1 LP Price", f"${iron_base_price:.4f}")
-            with colB:
-                st.metric("Reference-Based Total", f"${ref_total_price:,.2f}")
-                st.metric("Total LP Needed", f"{total_lp}")
+        # ---------- Charts ----------
+        st.markdown("### 📈 LP Price Progression Comparison")
+        fig, ax = plt.subplots()
+        ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path")
+        ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label="Client Path (inherits Ref final price)")
+        ax.set_xlabel("LP Step")
+        ax.set_ylabel("Price ($)")
+        ax.legend()
+        ax.set_facecolor("#1e1e1e")
+        st.pyplot(fig)
 
-            st.caption("Step price uses Iron IV reference base; cumulative remains on client base.")
-            st.dataframe(df, use_container_width=True)
-
-            # --- Chart ---
-            fig, ax = plt.subplots()
-            ax.plot(df["Step #"], df["Step Price ($)"], label="Step Price ($, Iron IV base)")
-            ax.plot(df["Step #"], df["Cumulative ($)"], label="Cumulative ($, Client base)")
-            ax.set_xlabel("Step # (LP Gain)")
-            ax.set_ylabel("Price ($)")
-            ax.legend()
-            ax.set_facecolor("#1e1e1e")
-            st.pyplot(fig)
-
-            st.success("✅ Calculation complete!")
+        st.success("✅ Calculation complete!")
 
     else:
         st.info("👆 Enter your ranks, then click **Calculate Boost Price**.")
