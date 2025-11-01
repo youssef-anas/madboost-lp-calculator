@@ -19,6 +19,7 @@ def rank_index(rank, div):
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
     """Compute total LP distance between current and target ranks."""
+    # current_lp will be an integer now
     curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
@@ -36,7 +37,8 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
 
     divs = abs(target_idx - curr_idx)
     ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
-    return total_lp, divs, ranks
+    # Return total_lp as an integer
+    return int(total_lp), divs, ranks
 
 
 # -----------------------------------------------------------
@@ -51,17 +53,18 @@ def calculate_price_progression(base_price, total_lp, lp_gain, multipliers):
     total_price = 0.0
     progression = []
 
+    # Iterate based on integer total_lp
     for step in range(1, int(total_lp) + 1):
         step_price *= (1 + growth)
         total_price += step_price
-        if step % 10 == 0:
+        if step % 10 == 0 or step == int(total_lp):
             progression.append({
                 "LP Step": step,
                 "Step Price ($)": round(step_price, 4),
                 "Cumulative ($)": round(total_price, 2)
             })
 
-    return round(total_price, 2), progression, step_price  # return final step price
+    return round(total_price, 2), progression, step_price
 
 
 # -----------------------------------------------------------
@@ -85,9 +88,10 @@ h1, h2, h3, h4, h5, h6, label, p {color: white !important;}
 col1, col2 = st.columns([1, 3])
 with col1:
     try:
-        st.image("madboost_logo.jpg", width=180)
+        # Assuming you have an image file named "madboost_logo.jpg"
+        st.image("madboost_logo.jpg", width=180) 
     except:
-        st.write("🔥 MadBoost")
+        st.write("🔥 **MadBoost**")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
     st.caption("Two-path linked LP pricing system — Reference path determines client’s base rate.")
@@ -101,15 +105,31 @@ with col_left:
     st.subheader("🎯 Current Rank")
     current_rank = st.selectbox("Current Rank", RANKS, index=0)
     current_div = st.selectbox("Current Division", DIVISIONS, index=0)
-    current_lp = st.number_input("Current LP", min_value=0.0, max_value=99.9, value=0.0, step=0.1)
+
+    # 🔑 CHANGE: Ensure current_lp is an integer input
+    current_lp = st.number_input("Current LP",
+                                 min_value=0,
+                                 max_value=99,
+                                 value=0,
+                                 step=1, # <--- Set step to 1 for integer steps
+                                 format="%d") # <--- Set format to integer
 
     st.subheader("🚀 Target Rank")
     target_rank = st.selectbox("Target Rank", RANKS, index=2)
     target_div = st.selectbox("Target Division", DIVISIONS, index=0)
+    # The list below uses integers, which is fine for target_lp
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    base_price = st.number_input("Base LP price ($)", min_value=0.01, value=0.10, step=0.01, format="%.2f")
+    # 🔑 CHANGE: Ensure base_price is an integer input
+    base_price = st.number_input("Base LP price ($)",
+                                 min_value=1,
+                                 value=1,
+                                 step=1, # <--- Set step to 1 for integer steps
+                                 format="%d") # <--- Set format to integer
+    # NOTE: The rest of the calculation logic (like ref_final_step) will still use floats
+    # for precision, but the user input will be a whole number.
+
     lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
 
     st.markdown("### Tier Multipliers (%)")
@@ -119,66 +139,71 @@ with col_left:
     multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     st.markdown(" ")
-    calc_button = st.button("💰 Calculate Boost Price")
+    calc_button = st.button("💰 **Calculate Boost Price**")
 
 # --- Results ---
 with col_right:
     if calc_button:
+        # The total_lp is calculated as an integer now
         total_lp, divs, ranks = calculate_lp_between_ranks(
             current_rank, current_div, current_lp, target_rank, target_div, target_lp
         )
 
         if total_lp <= 0:
             st.warning("⚠️ Invalid input — target rank must be higher or LP greater.")
-            st.stop()
+        else:
+            # ---------- REFERENCE PATH: Iron IV → Current ----------
+            ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
+            ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
+                base_price, ref_lp, lp_gain, multipliers
+            )
 
-        # ---------- REFERENCE PATH: Iron IV → Current ----------
-        ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
-        ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
-            base_price, ref_lp, lp_gain, multipliers
-        )
+            # ---------- CLIENT PATH: Current → Target ----------
+            client_total_price, client_progression, _ = calculate_price_progression(
+                ref_final_step, total_lp, lp_gain, multipliers
+            )
 
-        # ---------- CLIENT PATH: Current → Target ----------
-        client_total_price, client_progression, _ = calculate_price_progression(
-            ref_final_step, total_lp, lp_gain, multipliers
-        )
+            # ---------- DataFrames ----------
+            df_ref = pd.DataFrame(ref_progression)
+            df_client = pd.DataFrame(client_progression)
 
-        # ---------- DataFrames ----------
-        df_ref = pd.DataFrame(ref_progression)
-        df_client = pd.DataFrame(client_progression)
+            # --- Summary ---
+            st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
+            st.info(f"🧮 Total LP Required: **{total_lp} LP**")
+            st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
-        # ---------- Summary ----------
-        st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
-        st.info(f"🧮 Total LP Required: **{total_lp} LP**")
-        st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
+            colA, colB = st.columns(2)
+            with colA:
+                st.markdown("### 🧱 Reference Path (Iron IV → Current)")
+                st.metric("Total LP", f"{ref_lp}")
+                st.metric("Total Price", f"${ref_total_price:,.2f}")
+                st.metric("Final Step Price", f"${ref_final_step:.4f}")
+                st.dataframe(df_ref, use_container_width=True)
 
-        colA, colB = st.columns(2)
-        with colA:
-            st.markdown("### 🧱 Reference Path (Iron IV → Current)")
-            st.metric("Total LP", f"{ref_lp}")
-            st.metric("Total Price", f"${ref_total_price:,.2f}")
-            st.metric("Final Step Price", f"${ref_final_step:.4f}")
-            st.dataframe(df_ref, use_container_width=True)
+            with colB:
+                st.markdown("### 🚀 Client Path (Current → Target)")
+                st.metric("Total LP", f"{total_lp}")
+                st.metric("Total Price", f"${client_total_price:,.2f}")
+                st.metric("Starting LP Price", f"${ref_final_step:.4f}")
+                st.dataframe(df_client, use_container_width=True)
 
-        with colB:
-            st.markdown("### 🚀 Client Path (Current → Target)")
-            st.metric("Total LP", f"{total_lp}")
-            st.metric("Total Price", f"${client_total_price:,.2f}")
-            st.metric("Starting LP Price", f"${ref_final_step:.4f}")
-            st.dataframe(df_client, use_container_width=True)
+            # --- Charts ---
+            st.markdown("### 📈 LP Price Progression Comparison")
+            fig, ax = plt.subplots()
+            ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path")
+            ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label="Client Path (inherits Ref final price)")
+            ax.set_xlabel("LP Step")
+            ax.set_ylabel("Price ($)")
+            ax.legend()
+            ax.set_facecolor("#1e1e1e")
+            ax.tick_params(colors='white', which='both')
+            ax.spines['left'].set_color('white')
+            ax.spines['bottom'].set_color('white')
+            fig.patch.set_facecolor('#0e0e0e')
+            ax.title.set_color('white')
+            st.pyplot(fig) 
 
-        # ---------- Charts ----------
-        st.markdown("### 📈 LP Price Progression Comparison")
-        fig, ax = plt.subplots()
-        ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path")
-        ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label="Client Path (inherits Ref final price)")
-        ax.set_xlabel("LP Step")
-        ax.set_ylabel("Price ($)")
-        ax.legend()
-        ax.set_facecolor("#1e1e1e")
-        st.pyplot(fig)
-
-        st.success("✅ Calculation complete!")
+            st.success("✅ Calculation complete!")
 
     else:
         st.info("👆 Enter your ranks, then click **Calculate Boost Price**.")
