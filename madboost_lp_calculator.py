@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # --------------------------------------------------
-# MADBOOST RANK-TO-RANK LP CALCULATOR (with rank/division gap)
+# MADBOOST RANK-TO-RANK LP CALCULATOR (with target LP dropdown)
 # --------------------------------------------------
 
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
@@ -21,29 +21,33 @@ def rank_index(rank: str, div: str) -> int:
 
 
 # ---------- LP & Gap Calculation ----------
-def calculate_lp_between_ranks(current_rank, current_div, current_lp, target_rank, target_div):
+def calculate_lp_between_ranks(current_rank, current_div, current_lp, target_rank, target_div, target_lp):
     """Calculate total LP required and number of divisions/ranks between current and target."""
     curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
-    if target_idx < curr_idx:
-        return 0, 0, 0  # invalid (target lower than current)
+    if target_idx < curr_idx or (target_idx == curr_idx and target_lp <= current_lp):
+        return 0, 0, 0  # invalid (target lower or same)
 
     total_lp = 0
-    remaining_in_current = LP_PER_DIVISION - current_lp
-    total_lp += remaining_in_current
 
-    # Add 100 LP for each full division between
-    divisions_between = 0
-    while curr_idx + 1 < target_idx:
-        total_lp += LP_PER_DIVISION
-        curr_idx += 1
-        divisions_between += 1
+    # LP left in current division
+    if curr_idx == target_idx:
+        total_lp = target_lp - current_lp
+    else:
+        remaining_in_current = LP_PER_DIVISION - current_lp
+        total_lp += remaining_in_current
 
-    # Calculate rank difference
-    curr_rank_idx = RANKS.index(current_rank)
-    target_rank_idx = RANKS.index(target_rank)
-    ranks_between = target_rank_idx - curr_rank_idx
+        # Add 100 LP for each full division between
+        for i in range(curr_idx + 1, target_idx):
+            total_lp += LP_PER_DIVISION
+
+        # Add LP in target division
+        total_lp += target_lp
+
+    # Calculate division and rank gaps
+    divisions_between = abs(target_idx - curr_idx)
+    ranks_between = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
 
     return total_lp, divisions_between, ranks_between
 
@@ -113,6 +117,7 @@ with col_left:
     st.subheader("🚀 Target Rank")
     target_rank = st.selectbox("Target Rank", RANKS, index=3)
     target_div = st.selectbox("Target Division", DIVISIONS, index=0)
+    target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
     base_price = st.number_input("Base LP price ($)", min_value=0.01, value=0.5, step=0.01, format="%.2f")
@@ -131,17 +136,17 @@ with col_left:
 with col_right:
     if calc_button:
         total_lp, divisions_between, ranks_between = calculate_lp_between_ranks(
-            current_rank, current_div, current_lp, target_rank, target_div
+            current_rank, current_div, current_lp, target_rank, target_div, target_lp
         )
 
         if total_lp <= 0:
-            st.warning("⚠️ Invalid selection: target rank must be higher than current rank.")
+            st.warning("⚠️ Invalid selection: target rank must be higher than current rank or target LP > current LP.")
         else:
-            st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div}")
+            st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
             
             st.info(f"🧮 **Total LP Between Ranks: {total_lp} LP**")
             st.success(f"🎯 Divisions Between: {divisions_between} division(s) and {ranks_between} rank(s)")
-            st.caption(f"From {current_rank} {current_div} ({current_lp} LP) → {target_rank} {target_div}")
+            st.caption(f"From {current_rank} {current_div} ({current_lp} LP) → {target_rank} {target_div} ({target_lp} LP)")
 
             total_price, progression = calculate_lp_boost_price(base_price, total_lp, lp_gain, multipliers)
             st.metric(label="Total Boosting Price", value=f"${total_price}")
