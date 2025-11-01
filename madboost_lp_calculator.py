@@ -3,32 +3,30 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# --------------------------------------------------
-# MADBOOST RANK-TO-RANK LP CALCULATOR (with Next 1 LP Price)
-# --------------------------------------------------
+# ---------------------------------------
+# MADBOOST LP CALCULATOR (FULL VERSION)
+# ---------------------------------------
 
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
 DIVISIONS = ["IV", "III", "II", "I"]
 LP_PER_DIVISION = 100
 
 
-# ---------- Rank Index Helper ----------
+# -------------------- Rank Helpers --------------------
 def rank_index(rank: str, div: str) -> int:
-    """Convert rank + division into a linear index (Iron IV = 0, Diamond I = max)."""
-    rank_idx = RANKS.index(rank)
-    div_idx = DIVISIONS.index(div)
-    return rank_idx * len(DIVISIONS) + div_idx
+    """Convert rank + division into linear index."""
+    return RANKS.index(rank) * len(DIVISIONS) + DIVISIONS.index(div)
 
 
-# ---------- LP & Gap Calculation ----------
+# -------------------- LP Calculation --------------------
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
-    """Calculate total LP required and number of divisions/ranks between current and target."""
+    """Total LP difference between two rank/division states."""
     curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
     if target_idx < curr_idx or (target_idx == curr_idx and target_lp <= current_lp):
-        return 0, 0, 0  # invalid (target lower or same)
+        return 0, 0, 0  # invalid (lower or same rank)
 
     total_lp = 0
     if curr_idx == target_idx:
@@ -37,25 +35,20 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
         remaining_in_current = LP_PER_DIVISION - current_lp
         total_lp += remaining_in_current
 
-        # Full divisions in between
         for i in range(curr_idx + 1, target_idx):
             total_lp += LP_PER_DIVISION
 
-        # Add LP progress in target division
         total_lp += target_lp
 
     divisions_between = abs(target_idx - curr_idx)
     ranks_between = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
-
     return total_lp, divisions_between, ranks_between
 
 
-# ---------- Pricing Growth ----------
+# -------------------- Pricing Growth --------------------
 def calculate_lp_boost_price(base_price, total_lp, lp_gain, multipliers):
+    """Progressive LP pricing model."""
     lp_gain = lp_gain.lower()
-    if lp_gain not in multipliers:
-        raise ValueError("Gain level must be one of: low, mid, high")
-
     g = multipliers[lp_gain] / 100.0
     step_price = base_price
     total_price = 0.0
@@ -71,36 +64,29 @@ def calculate_lp_boost_price(base_price, total_lp, lp_gain, multipliers):
                 "Cumulative ($)": round(total_price, 2)
             })
 
-    return round(total_price, 2), progression
+    return round(total_price, 2), progression, round(step_price, 2)  # include final step price
 
 
-# ---------- Next LP Price ----------
+# -------------------- Next LP Price --------------------
 def next_lp_price(base_price, current_lp, lp_gain, multipliers):
-    """Return the price of the NEXT single LP point (after current_lp)."""
+    """Return price of next 1 LP gain."""
     lp_gain = lp_gain.lower()
-    if lp_gain not in multipliers:
-        raise ValueError("lp_gain must be one of: " + ", ".join(multipliers.keys()))
-
     g = multipliers[lp_gain] / 100.0
-    n = current_lp + 1  # next LP index
-    price = base_price * (1 + g) ** n
-    return round(price, 2)
+    n = current_lp + 1
+    return round(base_price * (1 + g) ** n, 2)
 
 
-# ---------- STREAMLIT UI ----------
+# -------------------- Streamlit UI --------------------
 st.set_page_config(page_title="MadBoost Rank Boost Calculator", layout="wide")
 
-# --- Styling ---
+# --- Custom Styling ---
 st.markdown("""
 <style>
 body {background-color: #0e0e0e; color: #fff;}
 .stApp {background-color: #0e0e0e;}
-.stButton button {
-    background-color: #ff5a00; color: white; border-radius: 10px; font-weight: bold;
-}
-.stButton button:hover {
-    background-color: #ff7b33; color: black;
-}
+h1, h2, h3, h4, h5, h6, label, p {color: white !important;}
+.stButton button {background-color: #ff5a00; color: white; border-radius: 10px; font-weight: bold;}
+.stButton button:hover {background-color: #ff7b33; color: black;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,26 +99,26 @@ with col1:
         st.write("🔥 MadBoost")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.write("From current rank to your target — calculates LP gap, divisions, next LP price, and total cost.")
-
+    st.caption("Includes dynamic LP pricing, reference comparison, and next LP prediction.")
 st.markdown("---")
 
-# --- Input Panel ---
+# --- Inputs ---
 col_left, col_right = st.columns([1, 2])
+
 with col_left:
     st.subheader("🎯 Current Rank")
-    current_rank = st.selectbox("Current Rank", RANKS, index=2)
+    current_rank = st.selectbox("Current Rank", RANKS, index=0)
     current_div = st.selectbox("Current Division", DIVISIONS, index=0)
     current_lp = st.number_input("Current LP", min_value=0, max_value=99, value=0, step=1)
 
     st.subheader("🚀 Target Rank")
-    target_rank = st.selectbox("Target Rank", RANKS, index=3)
+    target_rank = st.selectbox("Target Rank", RANKS, index=2)
     target_div = st.selectbox("Target Division", DIVISIONS, index=0)
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
     base_price = st.number_input("Base LP price ($)", min_value=0.01, value=0.5, step=0.01, format="%.2f")
-    lp_gain = st.selectbox("Gain level", ["low", "mid", "high"])
+    lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
 
     st.markdown("### Tier Multipliers (%)")
     m_low = st.number_input("Low (%)", min_value=0.0, value=5.0, step=0.5)
@@ -143,40 +129,52 @@ with col_left:
     st.markdown(" ")
     calc_button = st.button("💰 Calculate Boost Price")
 
-# --- Output Panel ---
+# --- Results ---
 with col_right:
     if calc_button:
-        total_lp, divisions_between, ranks_between = calculate_lp_between_ranks(
-            current_rank, current_div, current_lp,
-            target_rank, target_div, target_lp
+        total_lp, divs, ranks = calculate_lp_between_ranks(
+            current_rank, current_div, current_lp, target_rank, target_div, target_lp
         )
 
         if total_lp <= 0:
-            st.warning("⚠️ Invalid selection: target rank must be higher or target LP > current LP.")
+            st.warning("⚠️ Invalid input — target rank must be higher or LP greater.")
         else:
             st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
-            st.info(f"🧮 **Total LP Between Ranks: {total_lp} LP**")
-            st.success(f"🎯 Divisions Between: {divisions_between} division(s) and {ranks_between} rank(s)")
-            st.caption(f"From {current_rank} {current_div} ({current_lp} LP) → {target_rank} {target_div} ({target_lp} LP)")
+            st.info(f"🧮 Total LP Required: **{total_lp} LP**")
+            st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
-            total_price, progression = calculate_lp_boost_price(base_price, total_lp, lp_gain, multipliers)
-            st.metric("Total Boosting Price", f"${total_price}")
-
-            # NEW FEATURE → show price of next 1 LP
+            # --- Main Route ---
+            total_price, progression, last_step_price = calculate_lp_boost_price(
+                base_price, total_lp, lp_gain, multipliers
+            )
+            st.metric("Total Boost Price", f"${total_price}")
             next_price = next_lp_price(base_price, current_lp, lp_gain, multipliers)
             st.metric("💡 Price for Next 1 LP", f"${next_price}")
-            st.caption(f"At {lp_gain.upper()} growth: next LP = current {current_lp} + 1")
 
+            # --- Parallel Reference Calculation (Iron IV -> Target) ---
+            ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, target_rank, target_div, target_lp)
+            _, _, ref_last_price = calculate_lp_boost_price(base_price, ref_lp, lp_gain, multipliers)
+            percent_increase = ((ref_last_price - base_price) / base_price) * 100
+
+            st.markdown("### 🔍 Reference (Iron IV → Target Rank)")
+            st.write(f"**1 LP Price at Iron IV:** ${base_price:.2f}")
+            st.write(f"**1 LP Price at Target Rank:** ${ref_last_price:.2f}")
+            st.write(f"📈 LP price growth: **+{percent_increase:.1f}%** from Iron IV to {target_rank} {target_div}")
+
+            # --- Table + Chart ---
             df = pd.DataFrame(progression)
             st.dataframe(df, hide_index=True, use_container_width=True)
 
             fig, ax = plt.subplots(figsize=(6, 3))
-            ax.plot(df["LP Step"], df["Step Price ($)"], marker="o", color="#ff5a00")
+            ax.plot(df["LP Step"], df["Step Price ($)"], marker="o", color="#ff5a00", label="Current→Target Path")
+            ax.axhline(y=ref_last_price, color="cyan", linestyle="--", label="Target Rank Reference Price")
             ax.set_facecolor("#1e1e1e")
             ax.set_title(f"LP Price Progression ({total_lp} LP)", color="white")
             ax.set_xlabel("LP Step", color="white")
             ax.set_ylabel("Price ($)", color="white")
             ax.tick_params(colors="white")
+            ax.legend(facecolor="#1e1e1e", labelcolor="white")
             st.pyplot(fig)
+
     else:
-        st.info("👆 Choose your current and target ranks, then press **Calculate**.")
+        st.info("👆 Enter your ranks, divisions, and LPs, then click **Calculate**.")
