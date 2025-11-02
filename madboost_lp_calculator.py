@@ -116,19 +116,20 @@ with col_left:
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    # 🔑 CHANGE: Base LP price is now a decimal input
+    # 🔑 CHANGE 1: Base LP price to four decimal places
     base_price = st.number_input("Base LP price ($)",
-                                 min_value=0.01,  # Set min value as float
-                                 value=0.10,      # Set value as float
-                                 step=0.01,       # Set step to a decimal (e.g., 0.01 for cents)
-                                 format="%.2f")  # Set format to two decimal places
+                                 min_value=0.0001,
+                                 value=0.1000,
+                                 step=0.0001,       # Step set to 1/10000th
+                                 format="%.4f")  # Format set to four decimal places
 
     lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
 
     st.markdown("### Tier Multipliers (%)")
-    m_low = st.number_input("Low (%)", min_value=0.0, value=5.0, step=0.5)
-    m_mid = st.number_input("Mid (%)", min_value=0.0, value=10.0, step=0.5)
-    m_high = st.number_input("High (%)", min_value=0.0, value=20.0, step=0.5)
+    # 🔑 CHANGE 2: Multipliers to four decimal places
+    m_low = st.number_input("Low (%)", min_value=0.0000, value=5.0000, step=0.0001, format="%.4f")
+    m_mid = st.number_input("Mid (%)", min_value=0.0000, value=10.0000, step=0.0001, format="%.4f")
+    m_high = st.number_input("High (%)", min_value=0.0000, value=20.0000, step=0.0001, format="%.4f")
     multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     st.markdown(" ")
@@ -146,7 +147,6 @@ with col_right:
         else:
             # ---------- REFERENCE PATH: Iron IV → Current ----------
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
-            # base_price is now a float
             ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
                 base_price, ref_lp, lp_gain, multipliers
             )
