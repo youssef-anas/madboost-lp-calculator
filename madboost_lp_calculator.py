@@ -19,7 +19,6 @@ def rank_index(rank, div):
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
     """Compute total LP distance between current and target ranks."""
-    # current_lp will be an integer now
     curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
@@ -37,7 +36,6 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
 
     divs = abs(target_idx - curr_idx)
     ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
-    # Return total_lp as an integer
     return int(total_lp), divs, ranks
 
 
@@ -53,7 +51,6 @@ def calculate_price_progression(base_price, total_lp, lp_gain, multipliers):
     total_price = 0.0
     progression = []
 
-    # Iterate based on integer total_lp
     for step in range(1, int(total_lp) + 1):
         step_price *= (1 + growth)
         total_price += step_price
@@ -88,7 +85,6 @@ h1, h2, h3, h4, h5, h6, label, p {color: white !important;}
 col1, col2 = st.columns([1, 3])
 with col1:
     try:
-        # Assuming you have an image file named "madboost_logo.jpg"
         st.image("madboost_logo.jpg", width=180) 
     except:
         st.write("🔥 **MadBoost**")
@@ -106,29 +102,26 @@ with col_left:
     current_rank = st.selectbox("Current Rank", RANKS, index=0)
     current_div = st.selectbox("Current Division", DIVISIONS, index=0)
 
-    # 🔑 CHANGE: Ensure current_lp is an integer input
+    # Current LP remains an integer input
     current_lp = st.number_input("Current LP",
                                  min_value=0,
                                  max_value=99,
                                  value=0,
-                                 step=1, # <--- Set step to 1 for integer steps
-                                 format="%d") # <--- Set format to integer
+                                 step=1,
+                                 format="%d")
 
     st.subheader("🚀 Target Rank")
     target_rank = st.selectbox("Target Rank", RANKS, index=2)
     target_div = st.selectbox("Target Division", DIVISIONS, index=0)
-    # The list below uses integers, which is fine for target_lp
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    # 🔑 CHANGE: Ensure base_price is an integer input
+    # 🔑 CHANGE: Base LP price is now a decimal input
     base_price = st.number_input("Base LP price ($)",
-                                 min_value=1,
-                                 value=1,
-                                 step=1, # <--- Set step to 1 for integer steps
-                                 format="%d") # <--- Set format to integer
-    # NOTE: The rest of the calculation logic (like ref_final_step) will still use floats
-    # for precision, but the user input will be a whole number.
+                                 min_value=0.01,  # Set min value as float
+                                 value=0.10,      # Set value as float
+                                 step=0.01,       # Set step to a decimal (e.g., 0.01 for cents)
+                                 format="%.2f")  # Set format to two decimal places
 
     lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
 
@@ -144,7 +137,6 @@ with col_left:
 # --- Results ---
 with col_right:
     if calc_button:
-        # The total_lp is calculated as an integer now
         total_lp, divs, ranks = calculate_lp_between_ranks(
             current_rank, current_div, current_lp, target_rank, target_div, target_lp
         )
@@ -154,6 +146,7 @@ with col_right:
         else:
             # ---------- REFERENCE PATH: Iron IV → Current ----------
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
+            # base_price is now a float
             ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
                 base_price, ref_lp, lp_gain, multipliers
             )
