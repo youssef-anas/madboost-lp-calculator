@@ -29,6 +29,7 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
     if curr_idx == target_idx:
         total_lp = target_lp - current_lp
     else:
+        # Since current_lp is guaranteed to be an integer (0-99), this calculation is fine.
         total_lp += (LP_PER_DIVISION - current_lp)
         for i in range(curr_idx + 1, target_idx):
             total_lp += LP_PER_DIVISION
@@ -36,6 +37,7 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
 
     divs = abs(target_idx - curr_idx)
     ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
+    # Returns an integer LP value
     return int(total_lp), divs, ranks
 
 
@@ -52,15 +54,19 @@ def calculate_price_progression(base_price, total_lp, lp_gain, multipliers):
     progression = []
 
     for step in range(1, int(total_lp) + 1):
+        # Applies the price growth
         step_price *= (1 + growth)
         total_price += step_price
+        
+        # Records progression every 10 steps or at the final step
         if step % 10 == 0 or step == int(total_lp):
             progression.append({
                 "LP Step": step,
-                "Step Price ($)": round(step_price, 4),
+                "Step Price ($)": round(step_price, 4), # Keeping 4 decimal places for internal precision
                 "Cumulative ($)": round(total_price, 2)
             })
 
+    # Total price is rounded to 2 decimal places for currency display
     return round(total_price, 2), progression, step_price
 
 
@@ -102,7 +108,7 @@ with col_left:
     current_rank = st.selectbox("Current Rank", RANKS, index=0)
     current_div = st.selectbox("Current Division", DIVISIONS, index=0)
 
-    # Current LP remains an integer input
+    # Current LP remains an integer input (0-99)
     current_lp = st.number_input("Current LP",
                                  min_value=0,
                                  max_value=99,
@@ -116,20 +122,20 @@ with col_left:
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    # 🔑 CHANGE 1: Base LP price to four decimal places
+    # 🔑 CHANGE 1: Base LP price to three decimal places
     base_price = st.number_input("Base LP price ($)",
-                                 min_value=0.0001,
-                                 value=0.1000,
-                                 step=0.0001,       # Step set to 1/10000th
-                                 format="%.4f")  # Format set to four decimal places
+                                 min_value=0.001,
+                                 value=0.100,
+                                 step=0.001,       # Step set to 1/1000th
+                                 format="%.3f")  # Format set to three decimal places
 
     lp_gain = st.selectbox("Gain Level", ["low", "mid", "high"])
 
     st.markdown("### Tier Multipliers (%)")
-    # 🔑 CHANGE 2: Multipliers to four decimal places
-    m_low = st.number_input("Low (%)", min_value=0.0000, value=5.0000, step=0.0001, format="%.4f")
-    m_mid = st.number_input("Mid (%)", min_value=0.0000, value=10.0000, step=0.0001, format="%.4f")
-    m_high = st.number_input("High (%)", min_value=0.0000, value=20.0000, step=0.0001, format="%.4f")
+    # 🔑 CHANGE 2: Multipliers to three decimal places
+    m_low = st.number_input("Low (%)", min_value=0.000, value=5.000, step=0.001, format="%.3f")
+    m_mid = st.number_input("Mid (%)", min_value=0.000, value=10.000, step=0.001, format="%.3f")
+    m_high = st.number_input("High (%)", min_value=0.000, value=20.000, step=0.001, format="%.3f")
     multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     st.markdown(" ")
@@ -170,6 +176,7 @@ with col_right:
                 st.markdown("### 🧱 Reference Path (Iron IV → Current)")
                 st.metric("Total LP", f"{ref_lp}")
                 st.metric("Total Price", f"${ref_total_price:,.2f}")
+                # Display final step price with 4 decimal places for internal precision
                 st.metric("Final Step Price", f"${ref_final_step:.4f}")
                 st.dataframe(df_ref, use_container_width=True)
 
@@ -177,6 +184,7 @@ with col_right:
                 st.markdown("### 🚀 Client Path (Current → Target)")
                 st.metric("Total LP", f"{total_lp}")
                 st.metric("Total Price", f"${client_total_price:,.2f}")
+                # Display starting LP price with 4 decimal places for internal precision
                 st.metric("Starting LP Price", f"${ref_final_step:.4f}")
                 st.dataframe(df_client, use_container_width=True)
 
