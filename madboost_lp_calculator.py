@@ -55,28 +55,27 @@ def get_lp_by_rank_divisions(start_rank, start_div, start_lp, end_rank, end_div,
     if start_idx >= end_idx:
         return segments
 
-    # LP in starting rank/division
+    # LP remaining in starting rank/division
     lp_in_start = LP_PER_DIVISION - start_lp
-    if lp_in_start > 0:
-        segments.append((start_rank, lp_in_start))
+    segments.append((start_rank, lp_in_start))
 
-    # LP in intermediate ranks (divisions strictly between start and end)
+    # LP in intermediate ranks - go through each division between start and end
     for i in range(start_idx + 1, end_idx):
         rank_name = RANKS[i // len(DIVISIONS)]
-        # Check if we need to add a new rank or accumulate to existing
-        if not segments or segments[-1][0] != rank_name:
-            segments.append((rank_name, LP_PER_DIVISION))
-        else:
-            # Accumulate to existing rank
+        
+        # If the last segment is the same rank, add to it
+        if segments and segments[-1][0] == rank_name:
             segments[-1] = (rank_name, segments[-1][1] + LP_PER_DIVISION)
+        else:
+            # Otherwise, create a new segment
+            segments.append((rank_name, LP_PER_DIVISION))
 
     # LP in ending rank/division
-    if end_lp > 0:
-        end_rank_name = RANKS[end_idx // len(DIVISIONS)]
-        if segments and segments[-1][0] == end_rank_name:
-            segments[-1] = (end_rank_name, segments[-1][1] + end_lp)
-        else:
-            segments.append((end_rank_name, end_lp))
+    end_rank_name = RANKS[end_idx // len(DIVISIONS)]
+    if segments and segments[-1][0] == end_rank_name:
+        segments[-1] = (end_rank_name, segments[-1][1] + end_lp)
+    else:
+        segments.append((end_rank_name, end_lp))
 
     return segments
 
@@ -104,7 +103,7 @@ def calculate_price_progression(base_price, total_lp, lp_key, multipliers):
         if step % 10 == 0 or step == int(total_lp):
             progression.append({
                 "LP Step": step,
-                "Step Price ($)": round(step_price, 4), # Keeping 4 decimal places for internal precision
+                "Step Price ($)": round(step_price, 4),
                 "Cumulative ($)": round(total_price, 2)
             })
 
@@ -117,6 +116,8 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
     Calculate price progression considering rank-specific base prices.
     rank_lp_segments: list of (rank, lp_count) tuples
     rank_prices: dictionary mapping rank names to base prices
+    lp_key: 'fixed' for reference path or 'low'/'mid'/'high' for client path
+    multipliers: dictionary with growth rates
     """
     if not rank_lp_segments:
         return 0.0, [], 0.100
@@ -124,9 +125,9 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
     growth = multipliers[lp_key] / 100.0
     total_price = 0.0
     progression = []
-    step_price = 0.100  # Default fallback price
+    step_price = 0.100
     global_step = 0
-    total_steps = sum(lp_count for _, lp_count in rank_lp_segments)
+    total_steps = sum(int(lp_count) for _, lp_count in rank_lp_segments)
 
     for rank, lp_count in rank_lp_segments:
         base_price = rank_prices.get(rank, 0.100)
@@ -134,11 +135,11 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
 
         for step in range(1, int(lp_count) + 1):
             global_step += 1
-            # Applies the price growth
+            # Apply the price growth
             step_price *= (1 + growth)
             total_price += step_price
             
-            # Records progression every 10 steps or at the final step
+            # Record progression every 10 steps or at the final step
             if global_step % 10 == 0 or global_step == total_steps:
                 progression.append({
                     "LP Step": global_step,
@@ -235,8 +236,8 @@ with col_left:
     m_high = st.number_input("High (%)", min_value=0.000, value=20.000, step=0.001, format="%.3f")
     
     # Separate multipliers for the two paths
-    ref_multipliers = {"fixed": m_fixed} # Used for Iron IV -> Current
-    client_multipliers = {"low": m_low, "mid": m_mid, "high": m_high} # Used for Current -> Target
+    ref_multipliers = {"fixed": m_fixed}
+    client_multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     st.markdown(" ")
     calc_button = st.button("💰 **Calculate Boost Price**")
@@ -251,11 +252,15 @@ with col_right:
         if total_lp <= 0:
             st.warning("⚠️ Invalid input — target rank must be higher or LP greater.")
         else:
+            # DEBUG: Show segments
+            ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
+            client_segments = get_lp_by_rank_divisions(current_rank, current_div, current_lp, target_rank, target_div, target_lp)
+            
+            st.write(f"DEBUG - Ref Segments: {ref_segments}")
+            st.write(f"DEBUG - Client Segments: {client_segments}")
+            
             # ---------- REFERENCE PATH: Iron IV → Current ----------
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
-            
-            # Get LP segments by rank for reference path
-            ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
             
             # Use rank-specific prices for Reference Path
             ref_total_price, ref_progression, ref_final_step = calculate_price_progression_with_rank_prices(
@@ -263,9 +268,6 @@ with col_right:
             )
 
             # ---------- CLIENT PATH: Current → Target ----------
-            # Get LP segments by rank for client path
-            client_segments = get_lp_by_rank_divisions(current_rank, current_div, current_lp, target_rank, target_div, target_lp)
-            
             # Use user-selected lp_gain and client_multipliers for the Client Path
             client_total_price, client_progression, _ = calculate_price_progression_with_rank_prices(
                 client_segments, rank_prices, lp_gain.lower(), client_multipliers
@@ -274,6 +276,9 @@ with col_right:
             # ---------- DataFrames ----------
             df_ref = pd.DataFrame(ref_progression)
             df_client = pd.DataFrame(client_progression)
+            
+            st.write(f"DEBUG - Ref Progression: {ref_progression}")
+            st.write(f"DEBUG - Client Progression: {client_progression}")
             
             # Only proceed if the DataFrames have content
             if not df_ref.empty and not df_client.empty:
