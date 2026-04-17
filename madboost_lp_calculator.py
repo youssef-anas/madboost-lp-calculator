@@ -1,3 +1,4 @@
+
 # Run with: streamlit run madboost_lp_calculator.py
 import streamlit as st
 import pandas as pd
@@ -43,6 +44,41 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
     return int(total_lp), divs, ranks
 
 
+def get_lp_by_rank_divisions(start_rank, start_div, start_lp, end_rank, end_div, end_lp):
+    """
+    Break down LP into segments by rank tier.
+    Returns a list of tuples: (rank, lp_count)
+    """
+    segments = []
+    start_idx = rank_index(start_rank, start_div)
+    end_idx = rank_index(end_rank, end_div)
+
+    if start_idx >= end_idx:
+        return segments
+
+    # LP in starting rank/division
+    lp_in_start = LP_PER_DIVISION - start_lp
+    segments.append((start_rank, lp_in_start))
+
+    # LP in intermediate ranks
+    for i in range(start_idx + 1, end_idx):
+        rank_name = RANKS[i // len(DIVISIONS)]
+        if not segments or segments[-1][0] != rank_name:
+            segments.append((rank_name, 0))
+        # Add full division LP
+        segments[-1] = (segments[-1][0], segments[-1][1] + LP_PER_DIVISION)
+
+    # LP in ending rank
+    if start_idx < end_idx:
+        end_rank_name = RANKS[end_idx // len(DIVISIONS)]
+        if segments and segments[-1][0] == end_rank_name:
+            segments[-1] = (end_rank_name, segments[-1][1] + end_lp)
+        else:
+            segments.append((end_rank_name, end_lp))
+
+    return segments
+
+
 # -----------------------------------------------------------
 # PRICE PROGRESSION LOGIC
 # -----------------------------------------------------------
@@ -74,6 +110,39 @@ def calculate_price_progression(base_price, total_lp, lp_key, multipliers):
     return round(total_price, 2), progression, step_price
 
 
+def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, lp_key, multipliers):
+    """
+    Calculate price progression considering rank-specific base prices.
+    rank_lp_segments: list of (rank, lp_count) tuples
+    rank_prices: dictionary mapping rank names to base prices
+    """
+    growth = multipliers[lp_key] / 100.0
+    total_price = 0.0
+    progression = []
+    step_price = None
+    global_step = 0
+
+    for rank, lp_count in rank_lp_segments:
+        base_price = rank_prices.get(rank, 0.100)
+        step_price = base_price
+
+        for step in range(1, int(lp_count) + 1):
+            global_step += 1
+            # Applies the price growth
+            step_price *= (1 + growth)
+            total_price += step_price
+            
+            # Records progression every 10 steps or at the final step
+            if global_step % 10 == 0 or (rank_lp_segments[-1] == (rank, lp_count) and step == int(lp_count)):
+                progression.append({
+                    "LP Step": global_step,
+                    "Step Price ($)": round(step_price, 4),
+                    "Cumulative ($)": round(total_price, 2)
+                })
+
+    return round(total_price, 2), progression, step_price if step_price else base_price
+
+
 # -----------------------------------------------------------
 # STREAMLIT UI
 # -----------------------------------------------------------
@@ -100,7 +169,7 @@ with col1:
         st.write("🔥 **MadBoost**")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.caption("Two-path linked LP pricing system — Reference path determines client’s base rate.")
+    st.caption("Two-path linked LP pricing system — Reference path determines client's base rate.")
 
 st.markdown("---")
 
@@ -126,12 +195,22 @@ with col_left:
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
     st.markdown("### 💵 Pricing Settings")
-    # Base LP price accepts three decimal places
-    base_price = st.number_input("Base LP price ($)",
-                                 min_value=0.001,
-                                 value=0.100,
-                                 step=0.001,
-                                 format="%.3f")
+    st.markdown("#### Base LP Price per Rank")
+    
+    # Create rank-specific base prices
+    rank_prices = {}
+    rank_price_cols = st.columns(4)
+    for idx, rank in enumerate(RANKS):
+        col_idx = idx % 4
+        with rank_price_cols[col_idx]:
+            rank_prices[rank] = st.number_input(
+                f"{rank} ($/LP)",
+                min_value=0.001,
+                value=0.100,
+                step=0.001,
+                format="%.3f",
+                key=f"rank_price_{rank}"
+            )
     
     # 🔑 NEW FIELD: Fixed Rate for Reference Path only
     m_fixed = st.number_input("Fixed Rate (%) (Ref Path Only)",
@@ -169,15 +248,21 @@ with col_right:
             # ---------- REFERENCE PATH: Iron IV → Current ----------
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
             
-            # 🔑 Use 'fixed' key and ref_multipliers for the Reference Path
-            ref_total_price, ref_progression, ref_final_step = calculate_price_progression(
-                base_price, ref_lp, "fixed", ref_multipliers
+            # Get LP segments by rank for reference path
+            ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
+            
+            # 🔑 Use rank-specific prices for Reference Path
+            ref_total_price, ref_progression, ref_final_step = calculate_price_progression_with_rank_prices(
+                ref_segments, rank_prices, "fixed", ref_multipliers
             )
 
             # ---------- CLIENT PATH: Current → Target ----------
+            # Get LP segments by rank for client path
+            client_segments = get_lp_by_rank_divisions(current_rank, current_div, current_lp, target_rank, target_div, target_lp)
+            
             # Use user-selected lp_gain and client_multipliers for the Client Path
-            client_total_price, client_progression, _ = calculate_price_progression(
-                ref_final_step, total_lp, lp_gain.lower(), client_multipliers
+            client_total_price, client_progression, _ = calculate_price_progression_with_rank_prices(
+                client_segments, rank_prices, lp_gain.lower(), client_multipliers
             )
 
             # ---------- DataFrames ----------
@@ -233,10 +318,3 @@ with col_right:
 
     else:
         st.info("👆 Enter your ranks and pricing settings, then click **Calculate Boost Price**.")
-
-
-
-# -----------------------------------------------------------
-# RANK & LP SYSTEM
-# -----------------------------------------------------------
-
