@@ -244,8 +244,6 @@ RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
 DIVISIONS = ["IV", "III", "II", "I"]
 LP_PER_DIVISION = 100
 
-# Tier definitions: كل rank عنده سعر ثابت لكل LP
-# إنت بتحدد الأرقام دي من الـ settings
 DEFAULT_TIER_RATES = {
     "Iron":     0.030,
     "Bronze":   0.035,
@@ -262,7 +260,7 @@ def rank_index(rank, div):
 
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
-    curr_idx = rank_index(current_rank, current_div)
+    curr_idx   = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
     if target_idx < curr_idx or (target_idx == curr_idx and target_lp <= current_lp):
@@ -277,26 +275,31 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
             total_lp += LP_PER_DIVISION
         total_lp += target_lp
 
-    divs = abs(target_idx - curr_idx)
+    divs  = abs(target_idx - curr_idx)
     ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
     return int(total_lp), divs, ranks
 
 
-# -----------------------------------------------------------
-# NEW: TIERED FLAT PRICING
-# -----------------------------------------------------------
-
 def get_division_rank(div_index):
-    """بياخد index الـ division ويرجع اسم الـ rank."""
     return RANKS[div_index // len(DIVISIONS)]
 
 
+# -----------------------------------------------------------
+# TIERED PRICING + GAIN MULTIPLIER
+# -----------------------------------------------------------
+
+GAIN_LABELS = {
+    "low":  "Low  (slow LP gain)",
+    "mid":  "Mid  (average LP gain)",
+    "high": "High (fast LP gain)",
+}
+
 def calculate_tiered_price(start_rank, start_div, start_lp,
-                           end_rank, end_div, end_lp,
-                           tier_rates):
+                           end_rank,   end_div,   end_lp,
+                           tier_rates, gain_multiplier=1.0):
     """
-    بتحسب السعر بطريقة tiered:
-    كل LP في tier معين بيتحسب بسعره الثابت.
+    Flat tiered pricing per LP, then multiplied by the gain level modifier.
+    gain_multiplier: 1.0 = no change, 1.20 = +20% for high gain, etc.
     """
     start_idx = rank_index(start_rank, start_div)
     end_idx   = rank_index(end_rank,   end_div)
@@ -311,28 +314,29 @@ def calculate_tiered_price(start_rank, start_div, start_lp,
 
     while current_idx <= end_idx:
         rank_name = get_division_rank(current_idx)
-        rate      = tier_rates[rank_name]
+        base_rate = tier_rates[rank_name]
 
-        # كام LP بنحسبهم في الـ division دي؟
-        if current_idx == end_idx:
-            lp_in_div = end_lp - current_lp
-        else:
-            lp_in_div = LP_PER_DIVISION - current_lp
+        lp_in_div = (end_lp - current_lp) if current_idx == end_idx \
+                    else (LP_PER_DIVISION - current_lp)
 
-        cost = lp_in_div * rate
-        total_price += cost
+        # Apply gain multiplier to the rate for this division
+        effective_rate = base_rate * gain_multiplier
+        cost           = lp_in_div * effective_rate
+        total_price   += cost
 
         if lp_in_div > 0:
-            div_name  = DIVISIONS[current_idx % len(DIVISIONS)]
+            div_name = DIVISIONS[current_idx % len(DIVISIONS)]
             breakdown.append({
-                "Division":    f"{rank_name} {div_name}",
-                "LP":          lp_in_div,
-                "Rate ($/LP)": rate,
-                "Cost ($)":    round(cost, 2),
+                "Division":        f"{rank_name} {div_name}",
+                "LP":              lp_in_div,
+                "Base Rate ($/LP)": round(base_rate, 4),
+                "Gain Modifier":   f"×{gain_multiplier:.2f}",
+                "Eff. Rate ($/LP)": round(effective_rate, 4),
+                "Cost ($)":        round(cost, 2),
             })
 
         current_idx += 1
-        current_lp   = 0  # بعد أول division نبدأ من 0
+        current_lp   = 0
 
     return round(total_price, 2), breakdown
 
@@ -343,6 +347,7 @@ def calculate_tiered_price(start_rank, start_div, start_lp,
 
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="MadBoost Rank Boost Calculator", layout="wide")
 
@@ -364,7 +369,7 @@ with col1:
         st.write("🔥 **MadBoost**")
 with col2:
     st.title("MadBoost Rank Boost Calculator")
-    st.caption("Tiered flat pricing — each rank tier has its own fixed LP rate.")
+    st.caption("Tiered flat pricing per LP — gain level applies a flat multiplier on top.")
 
 st.markdown("---")
 
@@ -374,7 +379,8 @@ with col_left:
     st.subheader("🎯 Current Rank")
     current_rank = st.selectbox("Current Rank", RANKS, index=0)
     current_div  = st.selectbox("Current Division", DIVISIONS, index=0)
-    current_lp   = st.number_input("Current LP", min_value=0, max_value=99, value=0, step=1, format="%d")
+    current_lp   = st.number_input("Current LP", min_value=0, max_value=99,
+                                   value=0, step=1, format="%d")
 
     st.subheader("🚀 Target Rank")
     target_rank = st.selectbox("Target Rank", RANKS, index=3)
@@ -382,24 +388,39 @@ with col_left:
     target_lp   = st.selectbox("Target LP", [0, 10, 30, 50, 70, 90], index=0)
 
     st.markdown("### 💵 Tier Rates ($ per LP)")
-    st.caption("Set the price per LP for each rank tier. Higher ranks = higher rate.")
-
+    st.caption("Base price per LP for each rank tier.")
     tier_rates = {}
     for rank in RANKS:
-        default = DEFAULT_TIER_RATES[rank]
         tier_rates[rank] = st.number_input(
             f"{rank} ($/LP)",
             min_value=0.001,
-            value=default,
+            value=DEFAULT_TIER_RATES[rank],
             step=0.001,
             format="%.3f"
         )
+
+    st.markdown("### 🎮 LP Gain Level")
+    st.caption("Higher gain = booster finishes faster = lower price. Lower gain = slower = higher price.")
+
+    gain_level = st.selectbox("Gain Level", list(GAIN_LABELS.keys()),
+                              format_func=lambda x: GAIN_LABELS[x])
+
+    st.markdown("#### Gain Multipliers")
+    st.caption("1.00 = no change. >1.00 = price increase. <1.00 = discount.")
+    m_low  = st.number_input("Low multiplier",  min_value=0.01, value=1.30,
+                              step=0.01, format="%.2f")
+    m_mid  = st.number_input("Mid multiplier",  min_value=0.01, value=1.00,
+                              step=0.01, format="%.2f")
+    m_high = st.number_input("High multiplier", min_value=0.01, value=0.80,
+                              step=0.01, format="%.2f")
+
+    gain_multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
     calc_button = st.button("💰 **Calculate Boost Price**")
 
 with col_right:
     if calc_button:
-        total_lp, divs, ranks = calculate_lp_between_ranks(
+        total_lp, divs, ranks_diff = calculate_lp_between_ranks(
             current_rank, current_div, current_lp,
             target_rank,  target_div,  target_lp
         )
@@ -407,38 +428,73 @@ with col_right:
         if total_lp <= 0:
             st.warning("⚠️ Target rank must be higher than current rank.")
         else:
+            chosen_mult = gain_multipliers[gain_level]
+
             total_price, breakdown = calculate_tiered_price(
                 current_rank, current_div, current_lp,
                 target_rank,  target_div,  target_lp,
-                tier_rates
+                tier_rates,   chosen_mult
             )
 
             st.subheader(f"{current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
-            st.info(f"🧮 Total LP: **{total_lp} LP** across {divs} divisions ({ranks} ranks)")
+            st.info(f"🧮 Total LP: **{total_lp} LP** | Divisions: {divs} | Ranks: {ranks_diff}")
 
-            colA, colB = st.columns(2)
+            colA, colB, colC = st.columns(3)
             with colA:
-                st.metric("Total Price", f"${total_price:,.2f}")
+                st.metric("Total Price",    f"${total_price:,.2f}")
             with colB:
-                st.metric("Avg Rate", f"${total_price/total_lp:.4f} / LP")
+                st.metric("Gain Level",     GAIN_LABELS[gain_level].split("(")[0].strip())
+            with colC:
+                st.metric("Gain Modifier",  f"×{chosen_mult:.2f}")
 
             st.markdown("### 📊 Price Breakdown by Division")
             df = pd.DataFrame(breakdown)
             st.dataframe(df, use_container_width=True)
 
-            # Quick sanity check
-            st.markdown("### 🔍 Sanity Check")
-            iron_to_gold, _, _ = calculate_lp_between_ranks("Iron","IV",0,"Gold","IV",0)
-            price_i2g, _ = calculate_tiered_price("Iron","IV",0,"Gold","IV",0, tier_rates)
-            iron_to_diamond, _, _ = calculate_lp_between_ranks("Iron","IV",0,"Diamond","I",100)
-            price_i2d, _ = calculate_tiered_price("Iron","IV",0,"Diamond","I",100, tier_rates)
+            # --- Comparison across all 3 gain levels ---
+            st.markdown("### 🔀 Gain Level Comparison")
+            comp_rows = []
+            for gl, gm in gain_multipliers.items():
+                p, _ = calculate_tiered_price(
+                    current_rank, current_div, current_lp,
+                    target_rank,  target_div,  target_lp,
+                    tier_rates,   gm
+                )
+                comp_rows.append({
+                    "Gain Level": GAIN_LABELS[gl],
+                    "Multiplier": f"×{gm:.2f}",
+                    "Total Price ($)": p,
+                })
+            st.dataframe(pd.DataFrame(comp_rows), use_container_width=True)
 
-            col1s, col2s = st.columns(2)
-            with col1s:
-                st.metric("Iron IV → Gold IV", f"${price_i2g:,.2f}", f"{iron_to_gold} LP")
-            with col2s:
-                st.metric("Iron IV → Diamond I", f"${price_i2d:,.2f}", f"{iron_to_diamond} LP")
+            # --- Bar chart comparison ---
+            fig, ax = plt.subplots(figsize=(5, 3))
+            labels = [r["Gain Level"].split("(")[0].strip() for r in comp_rows]
+            prices = [r["Total Price ($)"] for r in comp_rows]
+            colors = ["#ff5a00", "#ffaa00", "#44cc88"]
+            ax.bar(labels, prices, color=colors)
+            ax.set_ylabel("Price ($)", color="white")
+            ax.set_facecolor("#1e1e1e")
+            ax.tick_params(colors="white")
+            for spine in ax.spines.values():
+                spine.set_color("white")
+            fig.patch.set_facecolor("#0e0e0e")
+            st.pyplot(fig)
+
+            # --- Sanity check ---
+            st.markdown("### 🔍 Sanity Check (Mid gain)")
+            mid_mult = gain_multipliers["mid"]
+            checks = [
+                ("Iron IV", "Gold IV",     "Iron", "IV", 0, "Gold",    "IV",  0),
+                ("Iron IV", "Emerald IV",  "Iron", "IV", 0, "Emerald", "IV",  0),
+                ("Iron IV", "Diamond I",   "Iron", "IV", 0, "Diamond", "I",  100),
+            ]
+            sc_cols = st.columns(len(checks))
+            for col, (label_s, label_e, sr, sd, sl, er, ed, el) in zip(sc_cols, checks):
+                lp, _, _ = calculate_lp_between_ranks(sr, sd, sl, er, ed, el)
+                p, _     = calculate_tiered_price(sr, sd, sl, er, ed, el, tier_rates, mid_mult)
+                col.metric(f"{label_s}→{label_e}", f"${p:,.2f}", f"{lp} LP")
 
             st.success("✅ Done!")
     else:
-        st.info("👆 Set your ranks and tier rates, then click Calculate.")
+        st.info("👆 Set your ranks, tier rates, and gain level — then click Calculate.")
