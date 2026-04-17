@@ -252,36 +252,36 @@ with col_right:
         if total_lp <= 0:
             st.warning("⚠️ Invalid input — target rank must be higher or LP greater.")
         else:
-            # DEBUG: Show segments
-            ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
-            client_segments = get_lp_by_rank_divisions(current_rank, current_div, current_lp, target_rank, target_div, target_lp)
-            
-            st.write(f"DEBUG - Ref Segments: {ref_segments}")
-            st.write(f"DEBUG - Client Segments: {client_segments}")
-            
             # ---------- REFERENCE PATH: Iron IV → Current ----------
             ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
+            
+            # Get LP segments by rank for reference path
+            ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
             
             # Use rank-specific prices for Reference Path
             ref_total_price, ref_progression, ref_final_step = calculate_price_progression_with_rank_prices(
                 ref_segments, rank_prices, "fixed", ref_multipliers
             )
 
+            # If no reference segments (current rank is Iron IV), use the first rank's base price
+            if not ref_segments:
+                ref_final_step = rank_prices.get(current_rank, 0.100)
+
             # ---------- CLIENT PATH: Current → Target ----------
+            # Get LP segments by rank for client path
+            client_segments = get_lp_by_rank_divisions(current_rank, current_div, current_lp, target_rank, target_div, target_lp)
+            
             # Use user-selected lp_gain and client_multipliers for the Client Path
             client_total_price, client_progression, _ = calculate_price_progression_with_rank_prices(
                 client_segments, rank_prices, lp_gain.lower(), client_multipliers
             )
 
             # ---------- DataFrames ----------
-            df_ref = pd.DataFrame(ref_progression)
-            df_client = pd.DataFrame(client_progression)
+            df_ref = pd.DataFrame(ref_progression) if ref_progression else pd.DataFrame()
+            df_client = pd.DataFrame(client_progression) if client_progression else pd.DataFrame()
             
-            st.write(f"DEBUG - Ref Progression: {ref_progression}")
-            st.write(f"DEBUG - Client Progression: {client_progression}")
-            
-            # Only proceed if the DataFrames have content
-            if not df_ref.empty and not df_client.empty:
+            # Only proceed if Client Path has content (Reference Path can be empty if starting at Iron IV)
+            if not df_client.empty:
                 
                 # --- Summary ---
                 st.subheader(f"Results — {current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
@@ -289,14 +289,22 @@ with col_right:
                 st.success(f"🎯 Divisions: {divs} | Ranks: {ranks}")
 
                 colA, colB = st.columns(2)
+                
+                # Reference Path Column (only show if it has data)
                 with colA:
-                    st.markdown("### 🧱 Reference Path (Iron IV → Current)")
-                    st.metric("Multiplier Used", f"{m_fixed:.3f}% (Fixed)")
-                    st.metric("Total LP", f"{ref_lp}")
-                    st.metric("Total Price", f"${ref_total_price:,.2f}")
-                    st.metric("Final Step Price", f"${ref_final_step:.4f}")
-                    st.dataframe(df_ref, use_container_width=True)
+                    if not df_ref.empty:
+                        st.markdown("### 🧱 Reference Path (Iron IV → Current)")
+                        st.metric("Multiplier Used", f"{m_fixed:.3f}% (Fixed)")
+                        st.metric("Total LP", f"{ref_lp}")
+                        st.metric("Total Price", f"${ref_total_price:,.2f}")
+                        st.metric("Final Step Price", f"${ref_final_step:.4f}")
+                        st.dataframe(df_ref, use_container_width=True)
+                    else:
+                        st.markdown("### 🧱 Reference Path (Iron IV → Current)")
+                        st.info("ℹ️ No progression data (already at Iron IV - starting point)")
+                        st.metric("Base Price for Current Rank", f"${ref_final_step:.4f}")
 
+                # Client Path Column
                 with colB:
                     st.markdown("### 🚀 Client Path (Current → Target)")
                     st.metric("Multiplier Used", f"{client_multipliers[lp_gain.lower()]:.3f}% ({lp_gain.capitalize()})")
@@ -307,12 +315,16 @@ with col_right:
 
                 # --- Charts ---
                 st.markdown("### 📈 LP Price Progression Comparison")
-                fig, ax = plt.subplots()
-                ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path (Fixed Rate)", marker='o')
-                ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label=f"Client Path ({lp_gain.capitalize()} Rate)", marker='s')
-                ax.set_xlabel("LP Step")
-                ax.set_ylabel("Price ($)")
-                ax.legend() 
+                fig, ax = plt.subplots(figsize=(10, 6))
+                
+                if not df_ref.empty:
+                    ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path (Fixed Rate)", marker='o', linewidth=2)
+                
+                ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label=f"Client Path ({lp_gain.capitalize()} Rate)", marker='s', linewidth=2)
+                ax.set_xlabel("LP Step", fontsize=12)
+                ax.set_ylabel("Price ($)", fontsize=12)
+                ax.legend(fontsize=10)
+                ax.grid(True, alpha=0.3)
                 ax.set_facecolor("#1e1e1e")
                 ax.tick_params(colors='white', which='both')
                 ax.spines['left'].set_color('white')
@@ -326,7 +338,7 @@ with col_right:
                 st.success("✅ Calculation complete!")
 
             else:
-                st.warning("⚠️ Calculation resulted in empty progression data. Check if target rank is higher or equal to current rank with higher LP.")
+                st.warning("⚠️ Calculation resulted in empty client path data. Check if target rank is higher than current rank.")
 
     else:
         st.info("👆 Enter your ranks and pricing settings, then click **Calculate Boost Price**.")
