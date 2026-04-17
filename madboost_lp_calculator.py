@@ -57,18 +57,21 @@ def get_lp_by_rank_divisions(start_rank, start_div, start_lp, end_rank, end_div,
 
     # LP in starting rank/division
     lp_in_start = LP_PER_DIVISION - start_lp
-    segments.append((start_rank, lp_in_start))
+    if lp_in_start > 0:
+        segments.append((start_rank, lp_in_start))
 
-    # LP in intermediate ranks
+    # LP in intermediate ranks (divisions strictly between start and end)
     for i in range(start_idx + 1, end_idx):
         rank_name = RANKS[i // len(DIVISIONS)]
+        # Check if we need to add a new rank or accumulate to existing
         if not segments or segments[-1][0] != rank_name:
-            segments.append((rank_name, 0))
-        # Add full division LP
-        segments[-1] = (segments[-1][0], segments[-1][1] + LP_PER_DIVISION)
+            segments.append((rank_name, LP_PER_DIVISION))
+        else:
+            # Accumulate to existing rank
+            segments[-1] = (rank_name, segments[-1][1] + LP_PER_DIVISION)
 
-    # LP in ending rank
-    if start_idx < end_idx:
+    # LP in ending rank/division
+    if end_lp > 0:
         end_rank_name = RANKS[end_idx // len(DIVISIONS)]
         if segments and segments[-1][0] == end_rank_name:
             segments[-1] = (end_rank_name, segments[-1][1] + end_lp)
@@ -115,11 +118,15 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
     rank_lp_segments: list of (rank, lp_count) tuples
     rank_prices: dictionary mapping rank names to base prices
     """
+    if not rank_lp_segments:
+        return 0.0, [], 0.100
+    
     growth = multipliers[lp_key] / 100.0
     total_price = 0.0
     progression = []
-    step_price = 0.100  # Default fallback price - FIXED: was None, caused UnboundLocalError
+    step_price = 0.100  # Default fallback price
     global_step = 0
+    total_steps = sum(lp_count for _, lp_count in rank_lp_segments)
 
     for rank, lp_count in rank_lp_segments:
         base_price = rank_prices.get(rank, 0.100)
@@ -132,7 +139,7 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
             total_price += step_price
             
             # Records progression every 10 steps or at the final step
-            if global_step % 10 == 0 or (rank_lp_segments[-1] == (rank, lp_count) and step == int(lp_count)):
+            if global_step % 10 == 0 or global_step == total_steps:
                 progression.append({
                     "LP Step": global_step,
                     "Step Price ($)": round(step_price, 4),
@@ -189,7 +196,7 @@ with col_left:
                                  format="%d")
 
     st.subheader("🚀 Target Rank")
-    target_rank = st.selectbox("Target Rank", RANKS, index=2)
+    target_rank = st.selectbox("Target Rank", RANKS, index=3)
     target_div = st.selectbox("Target Division", DIVISIONS, index=0)
     target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
@@ -296,8 +303,8 @@ with col_right:
                 # --- Charts ---
                 st.markdown("### 📈 LP Price Progression Comparison")
                 fig, ax = plt.subplots()
-                ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path (Fixed Rate)")
-                ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label=f"Client Path ({lp_gain.capitalize()} Rate)")
+                ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path (Fixed Rate)", marker='o')
+                ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label=f"Client Path ({lp_gain.capitalize()} Rate)", marker='s')
                 ax.set_xlabel("LP Step")
                 ax.set_ylabel("Price ($)")
                 ax.legend() 
@@ -305,6 +312,8 @@ with col_right:
                 ax.tick_params(colors='white', which='both')
                 ax.spines['left'].set_color('white')
                 ax.spines['bottom'].set_color('white')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
                 fig.patch.set_facecolor('#0e0e0e')
                 ax.title.set_color('white')
                 st.pyplot(fig)
@@ -312,7 +321,7 @@ with col_right:
                 st.success("✅ Calculation complete!")
 
             else:
-                st.warning("⚠️ Calculation resulted in empty progression data. Check if target rank is higher than current rank.")
+                st.warning("⚠️ Calculation resulted in empty progression data. Check if target rank is higher or equal to current rank with higher LP.")
 
     else:
         st.info("👆 Enter your ranks and pricing settings, then click **Calculate Boost Price**.")
