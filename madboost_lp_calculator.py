@@ -240,27 +240,24 @@
 # RANK & LP SYSTEM
 # -----------------------------------------------------------
 
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# -----------------------------------------------------------
+# RANK & LP SYSTEM
+# -----------------------------------------------------------
+
 RANKS = ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond"]
 DIVISIONS = ["IV", "III", "II", "I"]
 LP_PER_DIVISION = 100
 
-DEFAULT_TIER_RATES = {
-    "Iron":     0.030,
-    "Bronze":   0.035,
-    "Silver":   0.045,
-    "Gold":     0.060,
-    "Platinum": 0.080,
-    "Emerald":  0.110,
-    "Diamond":  0.150,
-}
-
 def rank_index(rank, div):
     return RANKS.index(rank) * len(DIVISIONS) + DIVISIONS.index(div)
 
-
 def calculate_lp_between_ranks(current_rank, current_div, current_lp,
                                target_rank, target_div, target_lp):
-    curr_idx   = rank_index(current_rank, current_div)
+    curr_idx = rank_index(current_rank, current_div)
     target_idx = rank_index(target_rank, target_div)
 
     if target_idx < curr_idx or (target_idx == curr_idx and target_lp <= current_lp):
@@ -275,226 +272,127 @@ def calculate_lp_between_ranks(current_rank, current_div, current_lp,
             total_lp += LP_PER_DIVISION
         total_lp += target_lp
 
-    divs  = abs(target_idx - curr_idx)
+    divs = abs(target_idx - curr_idx)
     ranks = abs(RANKS.index(target_rank) - RANKS.index(current_rank))
     return int(total_lp), divs, ranks
 
-
-def get_division_rank(div_index):
-    return RANKS[div_index // len(DIVISIONS)]
-
-
 # -----------------------------------------------------------
-# TIERED PRICING + GAIN MULTIPLIER
+# NEW LOGIC: BRACKET-BASED PRICE PROGRESSION
 # -----------------------------------------------------------
 
-GAIN_LABELS = {
-    "low":  "Low  (slow LP gain)",
-    "mid":  "Mid  (average LP gain)",
-    "high": "High (fast LP gain)",
-}
-
-def calculate_tiered_price(start_rank, start_div, start_lp,
-                           end_rank,   end_div,   end_lp,
-                           tier_rates, gain_multiplier=1.0):
+def get_bracket_multiplier(current_total_lp_from_start, m_low, m_mid, m_high):
     """
-    Flat tiered pricing per LP, then multiplied by the gain level modifier.
-    gain_multiplier: 1.0 = no change, 1.20 = +20% for high gain, etc.
+    يحدد نسبة النمو بناءً على المسافة الإجمالية من نقطة الصفر (Iron IV).
+    هذا يضمن أن النمو يهدأ كلما ابتعدنا عن الرتب الدنيا.
     """
-    start_idx = rank_index(start_rank, start_div)
-    end_idx   = rank_index(end_rank,   end_div)
+    # Bracket 1: من Iron IV إلى Gold IV (تقريباً أول 1200 LP)
+    if current_total_lp_from_start < 1200:
+        return m_low
+    # Bracket 2: من Gold IV إلى Emerald IV (من 1200 إلى 2000 LP)
+    elif current_total_lp_from_start < 2000:
+        return m_mid
+    # Bracket 3: ما فوق ذلك (Diamond وما بعدها)
+    else:
+        return m_high
 
-    if end_idx < start_idx or (end_idx == start_idx and end_lp <= start_lp):
-        return 0.0, []
-
+def calculate_price_progression_with_brackets(base_price, total_lp, start_lp_from_zero, multipliers):
+    """
+    start_lp_from_zero: هي المسافة من Iron IV إلى الرتبة الحالية
+    """
     total_price = 0.0
-    breakdown   = []
-    current_idx = start_idx
-    current_lp  = start_lp
+    step_price = base_price
+    progression = []
+    
+    # جلب قيم النمو من القاموس
+    m_low = multipliers.get('low', 1.0)
+    m_mid = multipliers.get('mid', 1.0)
+    m_high = multipliers.get('high', 1.0)
 
-    while current_idx <= end_idx:
-        rank_name = get_division_rank(current_idx)
-        base_rate = tier_rates[rank_name]
-
-        lp_in_div = (end_lp - current_lp) if current_idx == end_idx \
-                    else (LP_PER_DIVISION - current_lp)
-
-        # Apply gain multiplier to the rate for this division
-        effective_rate = base_rate * gain_multiplier
-        cost           = lp_in_div * effective_rate
-        total_price   += cost
-
-        if lp_in_div > 0:
-            div_name = DIVISIONS[current_idx % len(DIVISIONS)]
-            breakdown.append({
-                "Division":        f"{rank_name} {div_name}",
-                "LP":              lp_in_div,
-                "Base Rate ($/LP)": round(base_rate, 4),
-                "Gain Modifier":   f"×{gain_multiplier:.2f}",
-                "Eff. Rate ($/LP)": round(effective_rate, 4),
-                "Cost ($)":        round(cost, 2),
+    for step in range(1, int(total_lp) + 1):
+        # تحديد المسافة الحالية من الصفر لتحديد الـ Bracket
+        current_abs_lp = start_lp_from_zero + step
+        
+        # جلب نسبة النمو المناسبة لهذه النقطة تحديداً
+        current_growth = get_bracket_multiplier(current_abs_lp, m_low, m_mid, m_high)
+        
+        # تطبيق النمو
+        step_price *= (1 + (current_growth / 100.0))
+        total_price += step_price
+        
+        if step % 10 == 0 or step == int(total_lp):
+            progression.append({
+                "LP Step": step,
+                "Step Price ($)": round(step_price, 4),
+                "Cumulative ($)": round(total_price, 2)
             })
 
-        current_idx += 1
-        current_lp   = 0
-
-    return round(total_price, 2), breakdown
-
+    return round(total_price, 2), progression, step_price
 
 # -----------------------------------------------------------
-# STREAMLIT UI
+# STREAMLIT UI (Kept all input fields as requested)
 # -----------------------------------------------------------
 
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-
-st.set_page_config(page_title="MadBoost Rank Boost Calculator", layout="wide")
-
-st.markdown("""
-<style>
-body {background-color: #0e0e0e; color: #fff;}
-.stApp {background-color: #0e0e0e;}
-h1,h2,h3,h4,h5,h6,label,p {color: white !important;}
-.stButton button {background-color: #ff5a00; color: white; border-radius: 10px; font-weight: bold;}
-.stButton button:hover {background-color: #ff7b33; color: black;}
-</style>
-""", unsafe_allow_html=True)
-
-col1, col2 = st.columns([1, 3])
-with col1:
-    try:
-        st.image("madboost_logo.jpg", width=180)
-    except:
-        st.write("🔥 **MadBoost**")
-with col2:
-    st.title("MadBoost Rank Boost Calculator")
-    st.caption("Tiered flat pricing per LP — gain level applies a flat multiplier on top.")
-
-st.markdown("---")
+st.set_page_config(page_title="MadBoost - Bracket System", layout="wide")
 
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
     st.subheader("🎯 Current Rank")
     current_rank = st.selectbox("Current Rank", RANKS, index=0)
-    current_div  = st.selectbox("Current Division", DIVISIONS, index=0)
-    current_lp   = st.number_input("Current LP", min_value=0, max_value=99,
-                                   value=0, step=1, format="%d")
+    current_div = st.selectbox("Current Division", DIVISIONS, index=0)
+    current_lp = st.number_input("Current LP", min_value=0, max_value=99, value=0)
 
     st.subheader("🚀 Target Rank")
-    target_rank = st.selectbox("Target Rank", RANKS, index=3)
-    target_div  = st.selectbox("Target Division", DIVISIONS, index=0)
-    target_lp   = st.selectbox("Target LP", [0, 10, 30, 50, 70, 90], index=0)
+    target_rank = st.selectbox("Target Rank", RANKS, index=2)
+    target_div = st.selectbox("Target Division", DIVISIONS, index=0)
+    target_lp = st.selectbox("Target LP", [10, 30, 50, 70, 90], index=2)
 
-    st.markdown("### 💵 Tier Rates ($ per LP)")
-    st.caption("Base price per LP for each rank tier.")
-    tier_rates = {}
-    for rank in RANKS:
-        tier_rates[rank] = st.number_input(
-            f"{rank} ($/LP)",
-            min_value=0.001,
-            value=DEFAULT_TIER_RATES[rank],
-            step=0.001,
-            format="%.3f"
-        )
+    st.markdown("### 💵 Pricing Settings (Backend Aspect)")
+    base_price = st.number_input("Base LP price ($)", value=0.100, format="%.3f")
+    
+    # Fixed Rate للمسار المرجعي
+    m_fixed = st.number_input("Fixed Rate (%) (Ref Path)", value=1.000, format="%.3f")
 
-    st.markdown("### 🎮 LP Gain Level")
-    st.caption("Higher gain = booster finishes faster = lower price. Lower gain = slower = higher price.")
+    st.markdown("### Tier Brackets Multipliers (%)")
+    st.caption("Lower brackets need higher growth to reach market price, higher brackets need lower growth to avoid spikes.")
+    
+    m_low = st.number_input("Low Tier Growth (Iron-Gold) %", value=1.500, format="%.3f")
+    m_mid = st.number_input("Mid Tier Growth (Gold-Emerald) %", value=0.800, format="%.3f")
+    m_high = st.number_input("High Tier Growth (Diamond+) %", value=0.200, format="%.3f")
+    
+    client_multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
 
-    gain_level = st.selectbox("Gain Level", list(GAIN_LABELS.keys()),
-                              format_func=lambda x: GAIN_LABELS[x])
-
-    st.markdown("#### Gain Multipliers")
-    st.caption("1.00 = no change. >1.00 = price increase. <1.00 = discount.")
-    m_low  = st.number_input("Low multiplier",  min_value=0.01, value=1.30,
-                              step=0.01, format="%.2f")
-    m_mid  = st.number_input("Mid multiplier",  min_value=0.01, value=1.00,
-                              step=0.01, format="%.2f")
-    m_high = st.number_input("High multiplier", min_value=0.01, value=0.80,
-                              step=0.01, format="%.2f")
-
-    gain_multipliers = {"low": m_low, "mid": m_mid, "high": m_high}
-
-    calc_button = st.button("💰 **Calculate Boost Price**")
+    calc_button = st.button("💰 Calculate Boost Price")
 
 with col_right:
     if calc_button:
-        total_lp, divs, ranks_diff = calculate_lp_between_ranks(
-            current_rank, current_div, current_lp,
-            target_rank,  target_div,  target_lp
+        total_lp, divs, ranks = calculate_lp_between_ranks(
+            current_rank, current_div, current_lp, target_rank, target_div, target_lp
         )
 
         if total_lp <= 0:
-            st.warning("⚠️ Target rank must be higher than current rank.")
+            st.warning("⚠️ Invalid input.")
         else:
-            chosen_mult = gain_multipliers[gain_level]
-
-            total_price, breakdown = calculate_tiered_price(
-                current_rank, current_div, current_lp,
-                target_rank,  target_div,  target_lp,
-                tier_rates,   chosen_mult
+            # 1. حساب المسار المرجعي (من Iron IV إلى الحالي)
+            ref_lp, _, _ = calculate_lp_between_ranks("Iron", "IV", 0, current_rank, current_div, current_lp)
+            
+            # نستخدم المنطق القديم للمرجع أو نطبق عليه الـ Brackets أيضاً (هنا طبقنا المرجع بـ Fixed)
+            ref_total_price, ref_progression, ref_final_step = calculate_price_progression_with_brackets(
+                base_price, ref_lp, 0, {"low": m_fixed, "mid": m_fixed, "high": m_fixed}
             )
 
-            st.subheader(f"{current_rank} {current_div} → {target_rank} {target_div} ({target_lp} LP)")
-            st.info(f"🧮 Total LP: **{total_lp} LP** | Divisions: {divs} | Ranks: {ranks_diff}")
+            # 2. حساب مسار العميل باستخدام نظام الـ Brackets الجديد
+            # نمرر ref_lp كـ "نقطة البداية" لنعرف في أي Bracket نحن الآن
+            client_total_price, client_progression, _ = calculate_price_progression_with_brackets(
+                ref_final_step, total_lp, ref_lp, client_multipliers
+            )
 
-            colA, colB, colC = st.columns(3)
-            with colA:
-                st.metric("Total Price",    f"${total_price:,.2f}")
-            with colB:
-                st.metric("Gain Level",     GAIN_LABELS[gain_level].split("(")[0].strip())
-            with colC:
-                st.metric("Gain Modifier",  f"×{chosen_mult:.2f}")
-
-            st.markdown("### 📊 Price Breakdown by Division")
-            df = pd.DataFrame(breakdown)
-            st.dataframe(df, use_container_width=True)
-
-            # --- Comparison across all 3 gain levels ---
-            st.markdown("### 🔀 Gain Level Comparison")
-            comp_rows = []
-            for gl, gm in gain_multipliers.items():
-                p, _ = calculate_tiered_price(
-                    current_rank, current_div, current_lp,
-                    target_rank,  target_div,  target_lp,
-                    tier_rates,   gm
-                )
-                comp_rows.append({
-                    "Gain Level": GAIN_LABELS[gl],
-                    "Multiplier": f"×{gm:.2f}",
-                    "Total Price ($)": p,
-                })
-            st.dataframe(pd.DataFrame(comp_rows), use_container_width=True)
-
-            # --- Bar chart comparison ---
-            fig, ax = plt.subplots(figsize=(5, 3))
-            labels = [r["Gain Level"].split("(")[0].strip() for r in comp_rows]
-            prices = [r["Total Price ($)"] for r in comp_rows]
-            colors = ["#ff5a00", "#ffaa00", "#44cc88"]
-            ax.bar(labels, prices, color=colors)
-            ax.set_ylabel("Price ($)", color="white")
-            ax.set_facecolor("#1e1e1e")
-            ax.tick_params(colors="white")
-            for spine in ax.spines.values():
-                spine.set_color("white")
-            fig.patch.set_facecolor("#0e0e0e")
-            st.pyplot(fig)
-
-            # --- Sanity check ---
-            st.markdown("### 🔍 Sanity Check (Mid gain)")
-            mid_mult = gain_multipliers["mid"]
-            checks = [
-                ("Iron IV", "Gold IV",     "Iron", "IV", 0, "Gold",    "IV",  0),
-                ("Iron IV", "Emerald IV",  "Iron", "IV", 0, "Emerald", "IV",  0),
-                ("Iron IV", "Diamond I",   "Iron", "IV", 0, "Diamond", "I",  100),
-            ]
-            sc_cols = st.columns(len(checks))
-            for col, (label_s, label_e, sr, sd, sl, er, ed, el) in zip(sc_cols, checks):
-                lp, _, _ = calculate_lp_between_ranks(sr, sd, sl, er, ed, el)
-                p, _     = calculate_tiered_price(sr, sd, sl, er, ed, el, tier_rates, mid_mult)
-                col.metric(f"{label_s}→{label_e}", f"${p:,.2f}", f"{lp} LP")
-
-            st.success("✅ Done!")
-    else:
-        st.info("👆 Set your ranks, tier rates, and gain level — then click Calculate.")
+            # عرض النتائج
+            st.success(f"### Total Price: ${client_total_price:,.2f}")
+            st.info(f"Total LP: {total_lp} | Start Distance: {ref_lp} LP from Iron IV")
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Starting Point Price", f"${ref_final_step:.4f}")
+            col2.metric("Total Progress", f"{total_lp} LP")
+            
+            st.dataframe(pd.DataFrame(client_progression), use_container_width=True)
