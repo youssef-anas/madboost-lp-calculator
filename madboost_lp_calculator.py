@@ -1,4 +1,3 @@
-
 # Run with: streamlit run madboost_lp_calculator.py
 import streamlit as st
 import pandas as pd
@@ -119,7 +118,7 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
     growth = multipliers[lp_key] / 100.0
     total_price = 0.0
     progression = []
-    step_price = None
+    step_price = 0.100  # Default fallback price - FIXED: was None, caused UnboundLocalError
     global_step = 0
 
     for rank, lp_count in rank_lp_segments:
@@ -140,7 +139,7 @@ def calculate_price_progression_with_rank_prices(rank_lp_segments, rank_prices, 
                     "Cumulative ($)": round(total_price, 2)
                 })
 
-    return round(total_price, 2), progression, step_price if step_price else base_price
+    return round(total_price, 2), progression, step_price
 
 
 # -----------------------------------------------------------
@@ -212,7 +211,7 @@ with col_left:
                 key=f"rank_price_{rank}"
             )
     
-    # 🔑 NEW FIELD: Fixed Rate for Reference Path only
+    # Fixed Rate for Reference Path only
     m_fixed = st.number_input("Fixed Rate (%) (Ref Path Only)",
                               min_value=0.000,
                               value=1.000,
@@ -251,7 +250,7 @@ with col_right:
             # Get LP segments by rank for reference path
             ref_segments = get_lp_by_rank_divisions("Iron", "IV", 0, current_rank, current_div, current_lp)
             
-            # 🔑 Use rank-specific prices for Reference Path
+            # Use rank-specific prices for Reference Path
             ref_total_price, ref_progression, ref_final_step = calculate_price_progression_with_rank_prices(
                 ref_segments, rank_prices, "fixed", ref_multipliers
             )
@@ -269,7 +268,7 @@ with col_right:
             df_ref = pd.DataFrame(ref_progression)
             df_client = pd.DataFrame(client_progression)
             
-            # FIX FOR KEY ERROR: Only proceed if the DataFrames have content
+            # Only proceed if the DataFrames have content
             if not df_ref.empty and not df_client.empty:
                 
                 # --- Summary ---
@@ -297,7 +296,6 @@ with col_right:
                 # --- Charts ---
                 st.markdown("### 📈 LP Price Progression Comparison")
                 fig, ax = plt.subplots()
-                # The plotting is now safe from KeyErrors because we checked if the DFs are empty
                 ax.plot(df_ref["LP Step"], df_ref["Step Price ($)"], label="Reference Path (Fixed Rate)")
                 ax.plot(df_client["LP Step"], df_client["Step Price ($)"], label=f"Client Path ({lp_gain.capitalize()} Rate)")
                 ax.set_xlabel("LP Step")
